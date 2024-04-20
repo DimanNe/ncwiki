@@ -1,0 +1,74 @@
+networks:
+  nextcloud:
+    name: nextcloud
+    driver: bridge
+    enable_ipv6: false
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.21.0.0/16
+
+services:
+  pproxy:
+    image:          pproxy
+    container_name: pproxy
+    hostname:       pproxy
+    build:
+      context: ${NC_IMG_DIR__PPROXY}
+    restart: unless-stopped
+    networks: { nextcloud: { ipv4_address: 172.21.0.4 } }
+    ports:
+      - ${LISTEN_INTERFACE}:${LISTEN_PORT}:443/tcp
+      - ${LISTEN_INTERFACE}:${LISTEN_PORT}:443/udp
+    command:
+      - --log-level=info
+      - --listen-ip-port=0.0.0.0:443
+      - --dest-ip-port=nextcloud:80
+      - --priv-key=/keys/server-key.pem
+      - --cert=/keys/server-cert.pem
+      - --ca=/keys/CA.crt.pem
+      - --redir-domain=${TRUSTED_DOMAIN}
+    volumes:
+      - ${NC_DIR__PPROXY_KEYS}:/keys:ro
+
+
+  db:
+    image:          mariadb:lts
+    container_name: db
+    hostname:       db
+    restart: unless-stopped
+    expose: [3306]
+    networks: [ nextcloud ]
+    environment:
+      - MARIADB_USER=nextcloud
+      - MARIADB_DATABASE=nextcloud
+      - MARIADB_PASSWORD=${DB_PASSWORD}
+      - MARIADB_ROOT_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - ${NC_VOL__DB}:/var/lib/mysql:Z
+
+
+  nextcloud:
+    image:          nextcloud
+    container_name: nextcloud
+    hostname:       nextcloud
+    build:
+      context: ${NC_IMG_DIR__NC}
+    restart: unless-stopped
+    expose: [80]
+    networks: [ nextcloud ]
+    volumes:
+      - ${NC_VOL__NC}:/var/www/html/:rw
+    environment:
+      # DB config
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+      - MYSQL_HOST=db
+      # admin user
+      - NEXTCLOUD_ADMIN_USER=admin
+      - NEXTCLOUD_ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      # proxy
+      - NEXTCLOUD_TRUSTED_DOMAINS=${TRUSTED_DOMAIN}
+      - TRUSTED_PROXIES=172.21.0.4
+      - APACHE_DISABLE_REWRITE_IP=1
